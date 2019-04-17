@@ -9,7 +9,7 @@ namespace MyIoC
 {
 	public class Container
 	{
-        private readonly Dictionary<Type, Func<object>> _registeredTypes = new Dictionary<Type, Func<object>>();
+        private readonly Dictionary<Type, Type> _registeredTypes = new Dictionary<Type, Type>();
 
         private readonly Assembly _assembly;
 
@@ -45,7 +45,7 @@ namespace MyIoC
             {
                 foreach (var expType in exportTypes)
                 {
-                    if (impType == expType.GetCustomAttribute<ExportAttribute>().Contract)
+                    if (impType == expType || impType == expType.GetCustomAttribute<ExportAttribute>().Contract)
                     {
                         AddType(expType, impType);
                     }
@@ -56,37 +56,66 @@ namespace MyIoC
 		public void AddType(Type type)
 		{
             if (!_registeredTypes.ContainsKey(type))
-                _registeredTypes.Add(type, () => CreateInstance(type));
+                _registeredTypes.Add(type, type);
         }
 
 		public void AddType(Type type, Type baseType)
 		{
             if (!_registeredTypes.ContainsKey(baseType))
-                _registeredTypes.Add(baseType, () => CreateInstance(type));
+                _registeredTypes.Add(baseType, type);
         }
 
 
 		public object CreateInstance(Type type)
-		{
-            if (_registeredTypes.ContainsKey(type))
-            {
-                return _registeredTypes[type]();
-            }
-            
-            var constructor = type.GetConstructors()
-               .OrderByDescending(c => c.GetParameters().Length)
-               .First();
+		{      
+                if (_registeredTypes.ContainsKey(type))
+                {
+                    if (type != _registeredTypes[type])
+                    {
+                        return CreateInstance(_registeredTypes[type]);
+                    }
+                }
+                var constructor = type.GetConstructors()
+                   .OrderByDescending(c => c.GetParameters().Length)
+                   .First();
 
-            var args = constructor.GetParameters()
-                .Select(param => CreateInstance(param.ParameterType))
-                .ToArray();
+                var args = constructor.GetParameters().Select(param =>
+                    CreateInstance(param.ParameterType))
+                    .ToArray();
 
-            return Activator.CreateInstance(type, args);
+                return Activator.CreateInstance(type, args);
+
         }
 
-		public T CreateInstance<T>()
-		{
+        public object ResolveInstanceProperties(Type type)
+        {    
+            var instance = Activator.CreateInstance(type);
+
+            foreach (var prop in type.GetProperties())
+            {
+                if (prop.GetCustomAttribute<ImportAttribute>() != null)
+                {
+                     if (_registeredTypes.ContainsKey(prop.PropertyType))
+                    {
+                        prop.SetValue(instance, CreateInstance(_registeredTypes[prop.PropertyType]));
+                    }
+                    else
+                    {
+                        prop.SetValue(instance, CreateInstance(prop.PropertyType));
+                    }
+                }
+            }
+            return instance;
+        }
+
+        public T CreateInstance<T>()
+        {
             return (T)CreateInstance(typeof(T));
+        }
+
+        public T ResolveInstanceProperties<T>()
+		{
+            return (T)ResolveInstanceProperties(typeof(T));
         }
 
 
