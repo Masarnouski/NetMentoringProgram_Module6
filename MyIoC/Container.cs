@@ -1,4 +1,5 @@
-﻿using System;
+﻿using MyIoC.Exceptions;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -26,28 +27,28 @@ namespace MyIoC
         }
 
         public void AddAssembly(Assembly assembly)
-        { 
-            List<Type> typesToImport = new List<Type>();
-
-            var importTypes = assembly.GetTypes().SelectMany(type => type.GetProperties())
-                .Where(prop => prop.GetCustomAttribute<ImportAttribute>() != null).Select(prop => prop.PropertyType);
-
-            var constuctorArgs = assembly.GetTypes().Where(type => type.IsClass && type.GetCustomAttribute<ImportConstructorAttribute>() != null)
-                .SelectMany(type => type.GetConstructors()).OrderByDescending(c => c.GetParameters().Length)
-                .First().GetParameters().Select(param => param.ParameterType);
-
-            typesToImport.AddRange(importTypes);
-            typesToImport.AddRange(constuctorArgs);
-
-            var exportTypes = assembly.GetTypes().Where(type => type.IsClass && type.GetCustomAttribute<ExportAttribute>() != null);
-
-            foreach (var impType in typesToImport)
+        {
+            var listOfTypes = assembly.GetTypes();
+            foreach (var type in listOfTypes)
             {
-                foreach (var expType in exportTypes)
+                var typeImportConstrAttr = type.GetCustomAttribute<ImportConstructorAttribute>();
+                var typeImportPropAttr = type.GetProperties().Where(x => x.GetCustomAttribute<ImportAttribute>() != null);
+
+                if (typeImportConstrAttr != null || typeImportPropAttr.Count() > 0)
                 {
-                    if (impType == expType || impType == expType.GetCustomAttribute<ExportAttribute>().Contract)
+                    AddType(type, type);
+                }
+
+                var typeExportAttr = type.GetCustomAttributes<ExportAttribute>();
+                foreach (var exportAttr in typeExportAttr)
+                {
+                    if (exportAttr.Contract != null)
                     {
-                        AddType(expType, impType);
+                        AddType(type, exportAttr.Contract);
+                    }
+                    else
+                    {
+                        AddType(type, type);
                     }
                 }
             }
@@ -66,56 +67,60 @@ namespace MyIoC
         }
 
 
-		public object CreateInstance(Type type)
-		{      
-                if (_registeredTypes.ContainsKey(type))
-                {
-                    if (type != _registeredTypes[type])
-                    {
-                        return CreateInstance(_registeredTypes[type]);
-                    }
-                }
-                var constructor = type.GetConstructors()
-                   .OrderByDescending(c => c.GetParameters().Length)
-                   .First();
+        public object CreateInstance(Type type)
+        {
+            if (!_registeredTypes.ContainsKey(type))
+            {
+                throw new CustomIoCExpection($"CreateInstance method thrown an exception. Type {type.Name} is not registered.");
+            }
 
-                var args = constructor.GetParameters().Select(param =>
-                    CreateInstance(param.ParameterType))
-                    .ToArray();
+            var typeToGetInstance = _registeredTypes[type];
+            var constructors = typeToGetInstance.GetConstructors();
+               
 
-                return Activator.CreateInstance(type, args);
+            if (constructors.Length == 0)
+            {
+                throw new CustomIoCExpection($"CreateInstance method thrown an exception. Type {type.Name} doesn't have a public constructor.");
+            }
+
+            var constructor = constructors.OrderByDescending(c => c.GetParameters().Length).First();
+
+            var args = constructor.GetParameters().Select(param =>
+                CreateInstance(param.ParameterType))
+                .ToArray();
+
+            var instance = Activator.CreateInstance(typeToGetInstance, args);
+
+            if (type.GetCustomAttribute<ImportConstructorAttribute>() != null)
+            {
+                return instance;
+            }
+
+            ResolveProperties(type, instance);
+            return instance;
 
         }
 
-        public object ResolveInstanceProperties(Type type)
+        private void ResolveProperties(Type type, object instance)
         {    
-            var instance = Activator.CreateInstance(type);
-
-            foreach (var prop in type.GetProperties())
+            var propertiesToResolve = type.GetProperties().Where(prop =>prop.GetCustomAttribute<ImportAttribute>() != null);
+            foreach (var prop in propertiesToResolve)
             {
-                if (prop.GetCustomAttribute<ImportAttribute>() != null)
+                if (_registeredTypes.ContainsKey(prop.PropertyType))
                 {
-                     if (_registeredTypes.ContainsKey(prop.PropertyType))
-                    {
-                        prop.SetValue(instance, CreateInstance(_registeredTypes[prop.PropertyType]));
-                    }
-                    else
-                    {
-                        prop.SetValue(instance, CreateInstance(prop.PropertyType));
-                    }
+                    var resolvedProperty = CreateInstance(_registeredTypes[prop.PropertyType]);
+                    prop.SetValue(instance, resolvedProperty);
+                }
+                else
+                {
+                    throw new CustomIoCExpection($"Can't resolve property {prop.Name}. Type {prop.PropertyType} is not registered.");
                 }
             }
-            return instance;
         }
 
         public T CreateInstance<T>()
         {
             return (T)CreateInstance(typeof(T));
-        }
-
-        public T ResolveInstanceProperties<T>()
-		{
-            return (T)ResolveInstanceProperties(typeof(T));
         }
 
 

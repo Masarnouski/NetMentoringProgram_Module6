@@ -52,6 +52,7 @@
   <ItemGroup>
     <Compile Include="Class1.cs" />
     <Compile Include="Container.cs" />
+    <Compile Include="Exceptions\CustomIoCException.cs" />
     <Compile Include="ICustomerDAL.cs" />
     <Compile Include="Logger.cs" />
     <Compile Include="ImportAttribute.cs" />
