@@ -54,16 +54,21 @@ namespace MyIoC
             }
         }
 
-		public void AddType(Type type)
-		{
+        public void AddType(Type type)
+        {
             if (!_registeredTypes.ContainsKey(type))
+            {
                 _registeredTypes.Add(type, type);
+            }
         }
 
 		public void AddType(Type type, Type baseType)
 		{
+
             if (!_registeredTypes.ContainsKey(baseType))
+            {
                 _registeredTypes.Add(baseType, type);
+            }
         }
 
 
